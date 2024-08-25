@@ -36,7 +36,14 @@ main =
 
 file : Generate.Directory -> List Elm.File
 file directory =
-    [ Elm.fileWith [ "Phosphor" ]
+    mainModule directory
+        :: assets directory
+        :: perWeight directory
+
+
+mainModule : Generate.Directory -> Elm.File
+mainModule directory =
+    Elm.fileWith [ "Phosphor" ]
         { docs = ""
         , aliases =
             [ ( [ "Svg" ], "S" )
@@ -45,19 +52,19 @@ file directory =
         }
         [ Elm.docs
             (String.Multiline.here """
-                # Basic Usage
+          # Basic Usage
 
-                All icons have six weights; Regular, Thin, Light, Bold, Fill, and Duotone. Rendering an icon requires just a template and a weight:
+          All icons have six weights; Regular, Thin, Light, Bold, Fill, and Duotone. Rendering an icon requires just a template and a weight:
 
-                    cube : Html msg
-                    cube =
-                        Phosphor.cube Bold
-                            |> Phosphor.toHtml []
+              cube : Html msg
+              cube =
+                  Phosphor.cube Bold
+                      |> Phosphor.toHtml []
 
-                Change `Phosphor.cube` to the icon you prefer, a list of all icons is visible here: <https://phosphoricons.com>
+          Change `Phosphor.cube` to the icon you prefer, a list of all icons is visible here: <https://phosphoricons.com>
 
-                All icons of this package are provided as the internal type `Icon`. To turn them into an `Html msg`, simply use the `toHtml` function.
-            """)
+          All icons of this package are provided as the internal type `Icon`. To turn them into an `Html msg`, simply use the `toHtml` function.
+      """)
         , [ iconAlias.declaration
           , iconWeightType.declaration
           , iconVariantType
@@ -71,11 +78,11 @@ file directory =
         , Elm.docs
             (String.Multiline.here
                 """
-                # Customize Icons
+          # Customize Icons
 
-                Phosphor Icons are `1em` by default, and come with the class `ph-icon`. For the aperture icon for example, this will be: `ph-aperture`.
-                To customize its class and size attributes simply use the `withClass` and `withSize` functions before turning them into Html with `toHtml`.
-                """
+          Phosphor Icons are `1em` by default, and come with the class `ph-icon`. For the aperture icon for example, this will be: `ph-aperture`.
+          To customize its class and size attributes simply use the `withClass` and `withSize` functions before turning them into Html with `toHtml`.
+          """
             )
         , [ withClass.declaration
           , withSize.declaration
@@ -86,9 +93,9 @@ file directory =
         , Elm.docs
             (String.Multiline.here
                 """
-                # New Custom Icons
-                If you'd like to use same API while creating personally designed icons, you can use the `customIcon` function. You have to provide it with a `List (Svg Never)` that will be embedded into the icon."
-                """
+          # New Custom Icons
+          If you'd like to use same API while creating personally designed icons, you can use the `customIcon` function. You have to provide it with a `List (Svg Never)` that will be embedded into the icon."
+          """
             )
         , Elm.expose (Elm.group [ customIcon ])
         , Elm.docs "# IconList"
@@ -97,7 +104,6 @@ file directory =
             |> Elm.group
             |> Elm.expose
         ]
-    ]
 
 
 type alias IconWeightRecord =
@@ -384,6 +390,7 @@ iconVariantArg =
             )
 
 
+makeBuilder : Elm.Declare.Function (Elm.Expression -> Elm.Expression)
 makeBuilder =
     Elm.Declare.fn "makeBuilder"
         (Arg.varWith "src"
@@ -402,34 +409,27 @@ iconList (Generate.Directory directory) =
     directory.directories
         |> Dict.toList
         |> List.concatMap
-            (\( weight, Generate.Directory icons ) ->
+            (\( _, Generate.Directory icons ) ->
                 icons.files
                     |> Dict.toList
-                    |> List.map (\( filename, content ) -> ( toIconName filename, ( weight, content ) ))
+                    |> List.map (\( filename, _ ) -> toIconName filename)
             )
-        |> List.Extra.gatherEqualsBy (\( iconName, _ ) -> iconName)
-        |> List.sortBy (\( ( iconName, _ ), _ ) -> iconName)
+        |> List.Extra.unique
+        |> List.sort
         |> List.map
-            (\( ( iconName, _ ) as head, tail ) ->
-                let
-                    contents : Dict String String
-                    contents =
-                        (head :: tail)
-                            |> List.map Tuple.second
-                            |> Dict.fromList
-                in
+            (\iconName ->
                 Elm.fn
                     (Arg.var "weight")
                     (\weight ->
                         Elm.Let.letIn identity
                             |> Elm.Let.value "elements"
                                 (iconWeightType.case_ weight
-                                    { bold = toPathList (Dict.get "bold" contents)
-                                    , duotone = toPathList (Dict.get "duotone" contents)
-                                    , fill = toPathList (Dict.get "fill" contents)
-                                    , light = toPathList (Dict.get "light" contents)
-                                    , regular = toPathList (Dict.get "regular" contents)
-                                    , thin = toPathList (Dict.get "thin" contents)
+                                    { bold = assetName iconName "Bold"
+                                    , duotone = assetName iconName "Duotone"
+                                    , fill = assetName iconName "Fill"
+                                    , light = assetName iconName "Light"
+                                    , regular = assetName iconName "Regular"
+                                    , thin = assetName iconName "Thin"
                                     }
                                 )
                             |> Elm.Let.withBody makeBuilder.call
@@ -437,33 +437,94 @@ iconList (Generate.Directory directory) =
                     |> Elm.withType iconAlias.annotation
                     |> Elm.declaration iconName
                     |> Elm.withDocumentation
-                        ("![" ++ iconName ++ "](https://raw.githubusercontent.com/phosphor-icons/core/main/assets/regular/" ++ String.Extra.dasherize iconName ++ ".svg)")
+                        (iconLink (String.Extra.dasherize iconName ++ ".svg") "regular")
             )
 
 
-toPathList : Maybe String -> Elm.Expression
+assetName : String -> String -> Elm.Expression
+assetName iconName weight =
+    Elm.value
+        { importFrom = [ "Phosphor", "Assets" ]
+        , name =
+            case String.Extra.toSentenceCase weight of
+                "Regular" ->
+                    iconName
+
+                capitalWeight ->
+                    iconName ++ capitalWeight
+        , annotation = Nothing
+        }
+
+
+perWeight : Generate.Directory -> List Elm.File
+perWeight (Generate.Directory directory) =
+    directory.directories
+        |> Dict.toList
+        |> List.map
+            (\( weight, Generate.Directory icons ) ->
+                icons.files
+                    |> Dict.toList
+                    |> List.map
+                        (\( filename, _ ) ->
+                            let
+                                iconName : String
+                                iconName =
+                                    toIconName filename
+                            in
+                            assetName iconName weight
+                                |> makeBuilder.call
+                                |> Elm.withType (Annotation.named [ "Phosphor" ] "Icon")
+                                |> Elm.declaration iconName
+                                |> Elm.withDocumentation (iconLink filename weight)
+                        )
+                    |> Elm.file [ "Phosphor", String.Extra.toSentenceCase weight ]
+            )
+
+
+assets : Generate.Directory -> Elm.File
+assets (Generate.Directory directory) =
+    directory.directories
+        |> Dict.toList
+        |> List.concatMap
+            (\( weight, Generate.Directory icons ) ->
+                Dict.toList icons.files
+                    |> List.map (\( filename, content ) -> ( filename, weight, content ))
+            )
+        |> List.sortBy (\( filename, _, _ ) -> filename)
+        |> List.map
+            (\( filename, weight, content ) ->
+                toPathList content
+                    |> Elm.withType (Annotation.list (Svg.annotation_.svg (Annotation.var "msg")))
+                    |> Elm.declaration (String.Extra.camelize (String.replace ".svg" "" filename))
+                    |> Elm.withDocumentation (iconLink filename weight)
+                    |> Elm.expose
+            )
+        |> Elm.file [ "Phosphor", "Assets" ]
+
+
+iconLink : String -> String -> String
+iconLink filename weight =
+    "![" ++ toIconName filename ++ "](https://raw.githubusercontent.com/phosphor-icons/core/main/assets/" ++ weight ++ "/" ++ filename ++ ")"
+
+
+toPathList : String -> Elm.Expression
 toPathList content =
-    case content of
-        Nothing ->
-            Gen.Debug.todo "File not found"
+    case XmlParser.parse content of
+        Err _ ->
+            Gen.Debug.todo "Error parsing SVG: malformed xml"
 
-        Just xml ->
-            case XmlParser.parse xml of
-                Err _ ->
-                    Gen.Debug.todo "Error parsing SVG: malformed xml"
+        Ok { root } ->
+            case root of
+                XmlParser.Element "svg" _ children ->
+                    case Result.Extra.combineMap extractPath children of
+                        Err e ->
+                            Gen.Debug.todo ("Error parsing SVG: " ++ e)
 
-                Ok { root } ->
-                    case root of
-                        XmlParser.Element "svg" _ children ->
-                            case Result.Extra.combineMap extractPath children of
-                                Err e ->
-                                    Gen.Debug.todo ("Error parsing SVG: " ++ e)
+                        Ok results ->
+                            Elm.list results
 
-                                Ok results ->
-                                    Elm.list results
-
-                        _ ->
-                            Gen.Debug.todo "Wrong root node"
+                _ ->
+                    Gen.Debug.todo "Wrong root node"
 
 
 extractPath : XmlParser.Node -> Result String Elm.Expression
