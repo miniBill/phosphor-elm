@@ -2,8 +2,7 @@ module Generate exposing (main)
 
 {-| -}
 
-import Dict exposing (Dict)
-import Dict.Extra
+import Dict
 import Elm exposing (Declaration)
 import Elm.Annotation as Annotation exposing (Annotation)
 import Elm.Arg as Arg
